@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Emoke: 潮流贴纸版</title>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&display=swap" rel="stylesheet">
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        pop: {
+                            bg: '#FFF8F0',       // 米白纸质背景
+                            yellow: '#FFD93D',   // 亮黄
+                            red: '#FF6B6B',      // 波普红
+                            blue: '#4D96FF',     // 亮蓝
+                            green: '#6BCB77',    // 鲜绿
+                            dark: '#2D3436',     // 深灰描边
+                            gray: '#F0F0F0'
+                        }
+                    },
+                    fontFamily: { sans: ['"PingFang SC"', '"Microsoft YaHei"', 'Fredoka', 'sans-serif'] },
+                    boxShadow: {
+                        'pop': '4px 4px 0px #2D3436', // 硬边阴影
+                        'sticker': '2px 2px 0px rgba(0,0,0,0.1)'
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            background-color: theme('colors.pop.bg');
+            color: theme('colors.pop.dark');
+            font-family: theme('fontFamily.sans');
+            -webkit-tap-highlight-color: transparent;
+            /* 波普点阵背景 */
+            background-image: radial-gradient(theme('colors.pop.dark') 1px, transparent 1px);
+            background-size: 24px 24px;
+            background-color: #FFF8F0;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        .app-container { height: 100vh; display: flex; flex-direction: column; }
+        .content-area { flex: 1; overflow-y: auto; padding-bottom: 100px; position: relative; }
+
+        /* --- 2D 波普烟盒 --- */
+        .pack-wrapper {
+            width: 100%; display: flex; justify-content: center; padding-top: 40px;
+        }
+        .pop-pack {
+            width: 200px; height: 280px;
+            position: relative;
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+        .pop-pack:active { transform: scale(0.98); }
+
+        /* 烟盒后盖 (深色内里) */
+        .pack-body-back {
+            position: absolute; bottom: 0; left: 0; width: 100%; height: 100%;
+            background: #FFD93D;
+            border: 3px solid #2D3436;
+            border-radius: 16px;
+            z-index: 1;
+            box-shadow: 8px 8px 0px #2D3436; /* 经典的波普硬阴影 */
+        }
+        
+        /* 烟盒开口深色区 */
+        .pack-hole {
+            position: absolute; top: 10px; left: 10px; right: 10px; height: 100px;
+            background: #2D3436;
+            border-radius: 8px;
+            z-index: 2;
+        }
+
+        /* 烟盒前盖 (亮色) */
+        .pack-body-front {
+            position: absolute; bottom: 0; left: 0; width: 100%; height: 65%;
+            background: #FFD93D;
+            border: 3px solid #2D3436;
+            border-radius: 0 0 16px 16px;
+            border-top: none;
+            z-index: 10;
+            display: flex; align-items: center; justify-content: center;
+        }
+        /* 装饰性设计 */
+        .pack-design {
+            width: 80px; height: 80px;
+            background: #FFFFFF;
+            border: 3px solid #2D3436;
+            border-radius: 50%;
+            position: relative;
+        }
+        .pack-design::after {
+            content: '☁️'; font-size: 40px; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+        }
+
+        /* 翻盖 (纯2D翻折动画) */
+        .pack-lid {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100px;
+            background: #FFD93D;
+            border: 3px solid #2D3436;
+            border-radius: 16px 16px 0 0;
+            border-bottom: 1px dashed #2D3436;
+            z-index: 11;
+            transform-origin: top center;
+            transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        .pack-lid.open { transform: rotateX(180deg) translateY(-6px); z-index: 0; }
+
+        /* 香烟 */
+        .cig-pop {
+            width: 24px; height: 160px;
+            background: #FFFFFF;
+            border: 3px solid #2D3436;
+            border-radius: 8px;
+            position: absolute;
+            bottom: 100px; left: 50%; transform: translateX(-50%);
+            z-index: 5;
+            display: flex; flex-direction: column;
+            /* 初始隐藏在后面 */
+        }
+        .cig-filter {
+            height: 40px; width: 100%; background: #FF9F43; border-bottom: 3px solid #2D3436; border-radius: 5px 5px 0 0;
+            background-image: repeating-linear-gradient(45deg, transparent, transparent 2px, rgba(0,0,0,0.1) 2px, rgba(0,0,0,0.1) 4px);
+        }
+
+        /* --- 贴纸系统 --- */
+        .sticker-modal {
+            position: fixed; inset: 0; z-index: 100;
+            background: rgba(45, 52, 54, 0.8);
+            backdrop-filter: blur(4px);
+            display: flex; align-items: flex-end; /* 底部弹出 */
+            opacity: 0; pointer-events: none; transition: opacity 0.3s;
+        }
+        .sticker-modal.open { opacity: 1; pointer-events: auto; }
+        
+        .sticker-drawer {
+            width: 100%; background: #FFF; border-radius: 24px 24px 0 0; padding: 24px;
+            transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            border-top: 4px solid #2D3436;
+        }
+        .sticker-modal.open .sticker-drawer { transform: translateY(0); }
+
+        .sticker-grid {
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 16px;
+        }
+        .sticker-btn {
+            aspect-ratio: 1; border-radius: 12px; border: 3px solid #F0F0F0; background: #FFF;
+            font-size: 32px; display: flex; align-items: center; justify-content: center;
+            transition: all 0.2s; cursor: pointer;
+            flex-direction: column;
+        }
+        .sticker-btn span { font-size: 10px; margin-top: 2px; color: #888; font-weight: bold;}
+        .sticker-btn:hover { border-color: #2D3436; transform: translateY(-4px); background: #FFF8F0; }
+        .sticker-btn:active { transform: scale(0.9); }
+        
+        /* 贴纸样式 (用于列表) */
+        .log-sticker {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 40px; height: 40px; border-radius: 50%; background: #FFF;
+            border: 2px solid #2D3436; font-size: 20px; box-shadow: 2px 2px 0px rgba(0,0,0,0.1);
+        }
+
+        /* --- 手帐列表 --- */
+        .diary-card {
+            background: #FFF; border: 3px solid #2D3436; border-radius: 16px; padding: 16px;
+            margin-bottom: 12px; box-shadow: 4px 4px 0px #F0F0F0;
+            display: flex; align-items: center; justify-content: space-between;
+        }
+
+        /* --- 导航栏 --- */
+        .nav-bar {
+            position: fixed; bottom: 20px; left: 20px; right: 20px;
+            background: #2D3436; border-radius: 20px; height: 70px;
+            display: flex; justify-content: space-around; align-items: center;
+            box-shadow: 6px 6px 0px rgba(0,0,0,0.2); z-index: 50;
+        }
+        .nav-icon { color: #FFF; opacity: 0.5; transition: 0.2s; cursor: pointer; }
+        .nav-icon.active { opacity: 1; color: #FFD93D; transform: scale(1.1); }
+
+    </style>
+</head>
+<body>
+
+    <div class="app-container">
+        <header class="p-6 flex justify-between items-center z-20">
+            <div>
+                <h1 class="text-3xl font-black text-pop-dark tracking-tight">EMOKE</h1>
+                <span class="bg-pop-red text-white text-xs font-bold px-2 py-1 rounded border-2 border-pop-dark shadow-[2px_2px_0px_#2D3436]">贴纸限定版</span>
+            </div>
+            <div class="bg-white border-2 border-pop-dark px-3 py-1 rounded-full font-bold shadow-[2px_2px_0px_#2D3436]">
+                <span id="todayCount">0</span> / <span id="limitCount">20</span>
+            </div>
+        </header>
+
+        <div class="content-area" id="contentArea">
+            
+            <div id="page-home" class="tab-page">
+                
+                <div class="pack-wrapper">
+                    <div class="pop-pack" id="packTrigger">
+                        <div class="pack-body-back"></div>
+                        <div class="pack-hole"></div>
+                        
+                        <div class="cig-pop" id="heroCig">
+                            <div class="cig-filter"></div>
+                        </div>
+
+                        <div class="pack-body-front">
+                            <div class="pack-design"></div>
+                        </div>
+                        
+                        <div class="pack-lid" id="packLid"></div>
+                    </div>
+                </div>
+
+                <div class="px-6 mt-10">
+                    <div class="bg-pop-blue text-white p-4 rounded-xl border-2 border-pop-dark shadow-pop flex justify-between items-center mb-6">
+                        <span class="font-bold">距上一根:</span>
+                        <span class="font-mono font-bold bg-white text-pop-dark px-2 rounded" id="lastTime">准备就绪</span>
+                    </div>
+
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-xl font-black">心情手帐</h2>
+                        <span class="text-xs font-bold bg-pop-green text-white px-2 py-1 rounded border-2 border-pop-dark">今日</span>
+                    </div>
+
+                    <div id="diaryList" class="pb-4">
+                        <div class="text-center text-gray-400 py-8 font-bold border-2 border-dashed border-gray-300 rounded-xl">
+                            点击烟盒 记录此刻
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="page-stats" class="tab-page hidden px-6 pt-6">
+                <div class="bg-white border-2 border-pop-dark rounded-xl p-4 shadow-pop mb-6">
+                    <h2 class="font-black text-xl mb-4">心情统计</h2>
+                    <canvas id="stickerChart"></canvas>
+                </div>
+                <div class="bg-pop-yellow border-2 border-pop-dark rounded-xl p-4 shadow-pop">
+                     <h2 class="font-black text-xl mb-2">打卡日历</h2>
+                     <div class="grid grid-cols-7 gap-2 text-center font-bold text-xs" id="calGrid"></div>
+                </div>
+            </div>
+
+        </div>
+
+        <nav class="nav-bar">
+            <div class="nav-icon active" onclick="switchTab('home', this)">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+            </div>
+            <div class="nav-icon" onclick="switchTab('stats', this)">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/></svg>
+            </div>
+        </nav>
+    </div>
+
+    <div class="sticker-modal" id="stickerModal">
+        <div class="sticker-drawer">
+            <h3 class="text-2xl font-black mb-2">选择一张贴纸</h3>
+            <p class="text-sm font-bold opacity-50 mb-4">此刻感觉如何？</p>
+            
+            <div class="sticker-grid">
+                <div class="sticker-btn" onclick="logSticker('⚡️', '精神焕发')">⚡️<span>精神焕发</span></div>
+                <div class="sticker-btn" onclick="logSticker('🥱', '累了')">🥱<span>累了</span></div>
+                <div class="sticker-btn" onclick="logSticker('🤯', '压力大')">🤯<span>压力大</span></div>
+                <div class="sticker-btn" onclick="logSticker('😎', '惬意')">😎<span>惬意</span></div>
+                <div class="sticker-btn" onclick="logSticker('💩', '糟糕')">💩<span>糟糕</span></div>
+                <div class="sticker-btn" onclick="logSticker('☕️', '摸鱼')">☕️<span>摸鱼</span></div>
+                <div class="sticker-btn" onclick="logSticker('🔥', '瘾来了')">🔥<span>瘾来了</span></div>
+                <div class="sticker-btn" onclick="logSticker('🍺', '应酬')">🍺<span>应酬</span></div>
+            </div>
+            
+            <button onclick="closeModal()" class="w-full mt-6 py-3 font-bold bg-gray-100 rounded-xl hover:bg-gray-200">取消</button>
+        </div>
+    </div>
+
+    <script>
+        const CONFIG = { limit: 20 };
+        let state = { logs: [] };
+        const els = {
+            trigger: document.getElementById('packTrigger'),
+            lid: document.getElementById('packLid'),
+            heroCig: document.getElementById('heroCig'),
+            modal: document.getElementById('stickerModal'),
+            list: document.getElementById('diaryList'),
+            calGrid: document.getElementById('calGrid')
+        };
+
+        function init() {
+            const saved = localStorage.getItem('emoke_v9_cn_data');
+            if(saved) state.logs = JSON.parse(saved);
+            updateUI();
+            renderCalendar();
+            initChart();
+        }
+        function save() { localStorage.setItem('emoke_v9_cn_data', JSON.stringify(state.logs)); }
+        function getTodayStr() { return new Date().toLocaleDateString(); }
+
+        // --- 核心交互 ---
+        let isAnimating = false;
+        els.trigger.addEventListener('click', () => {
+            if(isAnimating) return;
+            const todayCount = state.logs.filter(l => l.date === getTodayStr()).length;
+            if(todayCount >= CONFIG.limit && !confirm("已达今日限额，确定要继续吗？")) return;
+
+            isAnimating = true;
+            if(navigator.vibrate) navigator.vibrate(50);
+
+            // GSAP 动画序列
+            const tl = gsap.timeline({
+                onComplete: () => {
+                    els.modal.classList.add('open');
+                }
+            });
+
+            // 1. 开盖
+            tl.to(els.lid, { rotateX: 180, duration: 0.3, ease: "back.out(1.7)" });
+            
+            // 2. 烟支向上滑出
+            tl.to(els.heroCig, { y: -120, duration: 0.4, ease: "power2.out" }, "-=0.1");
+            
+            // 3. 烟支消失
+            tl.to(els.heroCig, { opacity: 0, scale: 0.8, duration: 0.2 });
+        });
+
+        // --- 贴纸记录逻辑 ---
+        window.logSticker = function(emoji, mood) {
+            // 保存
+            state.logs.push({
+                ts: Date.now(),
+                date: getTodayStr(),
+                sticker: emoji,
+                mood: mood
+            });
+            save();
+            
+            closeModal();
+            updateUI();
+            renderCalendar();
+            updateChart();
+        }
+
+        window.closeModal = function() {
+            els.modal.classList.remove('open');
+            // 重置动画状态
+            gsap.to(els.heroCig, { y: 0, opacity: 1, scale: 1, duration: 0 });
+            gsap.to(els.lid, { rotateX: 0, duration: 0.3, delay: 0.2 });
+            isAnimating = false;
+        }
+
+        // --- UI 渲染 ---
+        function updateUI() {
+            const todayStr = getTodayStr();
+            const todayLogs = state.logs.filter(l => l.date === todayStr);
+            const count = todayLogs.length;
+
+            document.getElementById('todayCount').innerText = count;
+            document.getElementById('limitCount').innerText = CONFIG.limit;
+
+            if(count > 0) {
+                const last = todayLogs[todayLogs.length-1].ts;
+                const minDiff = Math.floor((Date.now() - last) / 60000);
+                document.getElementById('lastTime').innerText = minDiff < 60 ? `${minDiff}分钟前` : `${(minDiff/60).toFixed(1)}小时前`;
+            }
+
+            // 渲染手帐列表
+            els.list.innerHTML = '';
+            if(todayLogs.length === 0) {
+                els.list.innerHTML = `<div class="text-center text-pop-dark opacity-50 py-8 font-bold border-2 border-dashed border-gray-300 rounded-xl">点击烟盒 记录此刻</div>`;
+                return;
+            }
+
+            // 倒序显示
+            [...todayLogs].reverse().forEach(log => {
+                const date = new Date(log.ts);
+                const timeStr = `${date.getHours()}:${String(date.getMinutes()).padStart(2,'0')}`;
+                
+                const card = document.createElement('div');
+                card.className = 'diary-card';
+                card.innerHTML = `
+                    <div class="flex items-center gap-3">
+                        <div class="log-sticker text-2xl bg-pop-yellow">${log.sticker}</div>
+                        <div>
+                            <div class="font-bold text-pop-dark">${log.mood}</div>
+                            <div class="text-xs font-bold text-gray-400">${timeStr}</div>
+                        </div>
+                    </div>
+                    <div class="text-gray-300 font-bold">#${state.logs.indexOf(log) + 1}</div>
+                `;
+                els.list.appendChild(card);
+            });
+        }
+
+        // --- 日历与图表 ---
+        function renderCalendar() {
+            els.calGrid.innerHTML = '';
+            const todayStr = getTodayStr();
+            // 简单展示本周/本月最后7天
+            for(let i=6; i>=0; i--) {
+                const d = new Date(); d.setDate(d.getDate() - i);
+                const dStr = d.toLocaleDateString();
+                const count = state.logs.filter(l => l.date === dStr).length;
+                const isToday = dStr === todayStr;
+                
+                const day = document.createElement('div');
+                day.className = `aspect-square flex flex-col items-center justify-center rounded-lg border-2 ${isToday ? 'border-pop-dark bg-pop-yellow' : 'border-gray-200'}`;
+                day.innerHTML = `
+                    <span class="text-[10px] font-bold opacity-60">${d.getDate()}日</span>
+                    <span class="font-black ${count>0 ? 'text-pop-red':'text-gray-300'}">${count}</span>
+                `;
+                els.calGrid.appendChild(day);
+            }
+        }
+        
+        let chartInstance = null;
+        function updateChart() {
+            const ctx = document.getElementById('stickerChart');
+            if(!ctx) return;
+            const stickerCounts = {};
+            state.logs.forEach(l => stickerCounts[l.mood] = (stickerCounts[l.mood] || 0) + 1);
+            
+            if(chartInstance) chartInstance.destroy();
+            chartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: Object.keys(stickerCounts),
+                    datasets: [{
+                        label: '心情分布',
+                        data: Object.values(stickerCounts),
+                        backgroundColor: '#4D96FF',
+                        borderColor: '#2D3436',
+                        borderWidth: 2,
+                        borderRadius: 4
+                    }]
+                },
+                options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid: {display:false} }, x: { grid: {display:false} } } }
+            });
+        }
+        function initChart() { setTimeout(updateChart, 100); }
+
+        window.switchTab = function(tab, btn) {
+            document.querySelectorAll('.tab-page').forEach(el => el.classList.add('hidden'));
+            document.getElementById(`page-${tab}`).classList.remove('hidden');
+            document.querySelectorAll('.nav-icon').forEach(el => el.classList.remove('active'));
+            btn.classList.add('active');
+        }
+
+        init();
+
+    </script>
+</body>
+</html>
