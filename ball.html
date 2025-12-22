@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>球球大作战 - 网页单机版</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #222; touch-action: none; font-family: 'Arial', sans-serif; }
+        canvas { display: block; }
+        #ui {
+            position: absolute; top: 10px; left: 10px; pointer-events: none;
+            color: white; text-shadow: 1px 1px 2px black;
+        }
+        #score { font-size: 20px; font-weight: bold; }
+        #rank { font-size: 14px; margin-top: 5px; color: #ddd; }
+        
+        #gameOver {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center; color: white;
+            background: rgba(0,0,0,0.8); padding: 20px;
+            border-radius: 10px; display: none;
+        }
+        button {
+            background: #ff4757; color: white; border: none;
+            padding: 10px 20px; font-size: 18px; border-radius: 5px;
+            margin-top: 15px; cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <div id="score">体重: 10</div>
+        <div id="rank">当前排名: -</div>
+    </div>
+
+    <div id="gameOver">
+        <h1 id="endTitle">游戏结束</h1>
+        <p id="endScore">最终体重: 0</p>
+        <button onclick="restartGame()">重新开始</button>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // --- 游戏配置 ---
+    const MAP_WIDTH = 3000;
+    const MAP_HEIGHT = 3000;
+    const BOT_COUNT = 25;
+    const FOOD_COUNT = 400;
+    const COLORS = ['#ff4757', '#2ed573', '#1e90ff', '#ffa502', '#8e44ad', '#00cec9', '#ff6b81'];
+
+    let player = {};
+    let bots = [];
+    let foods = [];
+    let gameRunning = true;
+    let camera = { x: 0, y: 0 };
+
+    // 屏幕尺寸处理
+    function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // --- 辅助函数 ---
+    function randomColor() {
+        return COLORS[Math.floor(Math.random() * COLORS.length)];
+    }
+    function randomPos(max) {
+        return Math.random() * max;
+    }
+    function getDistance(a, b) {
+        return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
+    }
+
+    // --- 游戏对象 ---
+    class Blob {
+        constructor(x, y, radius, isPlayer = false) {
+            this.x = x;
+            this.y = y;
+            this.radius = radius;
+            this.color = isPlayer ? '#ffffff' : randomColor();
+            this.speed = 3;
+            this.isPlayer = isPlayer;
+            this.vx = 0;
+            this.vy = 0;
+            // 随机移动目标 (仅 AI 用)
+            this.targetX = Math.random() * MAP_WIDTH;
+            this.targetY = Math.random() * MAP_HEIGHT;
+            this.changeDirTimer = 0;
+        }
+
+        update() {
+            // 速度随着体积变大而减慢
+            let currentSpeed = 50 / (this.radius + 10) + 1; 
+            if(currentSpeed < 1) currentSpeed = 1;
+            if(currentSpeed > 5) currentSpeed = 5;
+
+            // AI 逻辑：简单的随机游走 + 边界反弹
+            if (!this.isPlayer) {
+                this.changeDirTimer++;
+                if (this.changeDirTimer > 100 || Math.random() < 0.01) {
+                    this.targetX = Math.random() * MAP_WIDTH;
+                    this.targetY = Math.random() * MAP_HEIGHT;
+                    this.changeDirTimer = 0;
+                }
+                
+                const angle = Math.atan2(this.targetY - this.y, this.targetX - this.x);
+                this.vx = Math.cos(angle) * currentSpeed;
+                this.vy = Math.sin(angle) * currentSpeed;
+            }
+
+            // 更新位置
+            this.x += this.vx;
+            this.y += this.vy;
+
+            // 边界限制
+            this.x = Math.max(this.radius, Math.min(MAP_WIDTH - this.radius, this.x));
+            this.y = Math.max(this.radius, Math.min(MAP_HEIGHT - this.radius, this.y));
+        }
+
+        draw() {
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+            ctx.fillStyle = this.color;
+            ctx.fill();
+            // 玩家加个边框
+            if(this.isPlayer) {
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 4;
+                ctx.stroke();
+            } else {
+                // AI 名字 (假装有名字)
+                ctx.fillStyle = "white";
+                ctx.font = (this.radius * 0.5) + "px Arial";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText("AI", this.x, this.y);
+            }
+            ctx.closePath();
+        }
+    }
+
+    // --- 初始化 ---
+    function initGame() {
+        player = new Blob(MAP_WIDTH / 2, MAP_HEIGHT / 2, 20, true);
+        bots = [];
+        foods = [];
+        gameRunning = true;
+        document.getElementById('gameOver').style.display = 'none';
+
+        // 生成 AI
+        for (let i = 0; i < BOT_COUNT; i++) {
+            bots.push(new Blob(randomPos(MAP_WIDTH), randomPos(MAP_HEIGHT), Math.random() * 30 + 10)); // AI 大小随机
+        }
+        // 生成食物
+        for (let i = 0; i < FOOD_COUNT; i++) {
+            foods.push({
+                x: randomPos(MAP_WIDTH),
+                y: randomPos(MAP_HEIGHT),
+                color: randomColor(),
+                radius: 4
+            });
+        }
+    }
+
+    // --- 输入控制 (鼠标 & 触摸) ---
+    let inputX = 0, inputY = 0;
+    
+    function handleInput(clientX, clientY) {
+        // 计算鼠标/手指相对于屏幕中心的角度
+        const centerX = window.innerWidth / 2;
+        const centerY = window.innerHeight / 2;
+        
+        const angle = Math.atan2(clientY - centerY, clientX - centerX);
+        // 设置玩家速度向量
+        const speed = 50 / (player.radius + 10) + 1.5; 
+        player.vx = Math.cos(angle) * speed;
+        player.vy = Math.sin(angle) * speed;
+    }
+
+    window.addEventListener('mousemove', e => handleInput(e.clientX, e.clientY));
+    window.addEventListener('touchmove', e => {
+        e.preventDefault(); // 防止滚动
+        handleInput(e.touches[0].clientX, e.touches[0].clientY);
+    }, { passive: false });
+
+
+    // --- 游戏循环 ---
+    function loop() {
+        if (!gameRunning) return;
+        requestAnimationFrame(loop);
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // 1. 计算摄像机位置 (让玩家始终在屏幕中心)
+        camera.x = player.x - canvas.width / 2;
+        camera.y = player.y - canvas.height / 2;
+
+        ctx.save();
+        ctx.translate(-camera.x, -camera.y);
+
+        // 2. 绘制背景网格
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let x = 0; x < MAP_WIDTH; x += 50) {
+            if (x >= camera.x && x <= camera.x + canvas.width) { // 只画屏幕内的
+                ctx.moveTo(x, Math.max(0, camera.y));
+                ctx.lineTo(x, Math.min(MAP_HEIGHT, camera.y + canvas.height));
+            }
+        }
+        for (let y = 0; y < MAP_HEIGHT; y += 50) {
+            if (y >= camera.y && y <= camera.y + canvas.height) {
+                ctx.moveTo(Math.max(0, camera.x), y);
+                ctx.lineTo(Math.min(MAP_WIDTH, camera.x + canvas.width), y);
+            }
+        }
+        ctx.stroke();
+
+        // 3. 绘制和逻辑：食物
+        for (let i = foods.length - 1; i >= 0; i--) {
+            let f = foods[i];
+            
+            // 绘制食物
+            ctx.beginPath();
+            ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2);
+            ctx.fillStyle = f.color;
+            ctx.fill();
+
+            // 检测玩家吃食物
+            if (getDistance(player, f) < player.radius) {
+                player.radius += 0.2; // 缓慢变大
+                foods.splice(i, 1);
+                foods.push({ x: randomPos(MAP_WIDTH), y: randomPos(MAP_HEIGHT), color: randomColor(), radius: 4 });
+            }
+            
+            // 检测 AI 吃食物 (简单的逻辑)
+            for(let b of bots) {
+                 if (getDistance(b, f) < b.radius) {
+                    b.radius += 0.2;
+                    // AI 吃了不立即生成，留给玩家机会
+                    if(Math.random() < 0.5) {
+                        foods.splice(i, 1);
+                        foods.push({ x: randomPos(MAP_WIDTH), y: randomPos(MAP_HEIGHT), color: randomColor(), radius: 4 });
+                        break; 
+                    }
+                 }
+            }
+        }
+
+        // 4. 绘制和逻辑：AI 对手
+        let allBlobs = [player, ...bots];
+        // 按照大小排序绘制，防止小的盖住大的
+        allBlobs.sort((a, b) => a.radius - b.radius);
+
+        bots.forEach(bot => bot.update());
+        player.update();
+
+        // 碰撞检测：吞噬逻辑
+        for (let i = 0; i < allBlobs.length; i++) {
+            let b1 = allBlobs[i];
+            b1.draw(); // 绘制
+
+            for (let j = 0; j < allBlobs.length; j++) {
+                if (i === j) continue;
+                let b2 = allBlobs[j];
+
+                let dist = getDistance(b1, b2);
+                
+                // 只有半径比对方大 20% 才能吃
+                if (dist < b1.radius && b1.radius > b2.radius * 1.1) {
+                    // b1 吃掉 b2
+                    let gainedArea = Math.PI * b2.radius * b2.radius;
+                    let newArea = Math.PI * b1.radius * b1.radius + gainedArea;
+                    b1.radius = Math.sqrt(newArea / Math.PI); // 面积守恒增长
+
+                    // 如果 b2 是玩家 -> 游戏结束
+                    if (b2 === player) {
+                        endGame();
+                        return; // 停止循环
+                    }
+                    // 如果 b1 是玩家 -> 玩家得分
+                    if (b1 === player) {
+                        // 吃到敌人加分多
+                    }
+
+                    // 重置被吃掉的 AI
+                    if (b2 !== player) {
+                        b2.x = randomPos(MAP_WIDTH);
+                        b2.y = randomPos(MAP_HEIGHT);
+                        b2.radius = Math.random() * 20 + 10;
+                    }
+                }
+            }
+        }
+
+        ctx.restore();
+
+        // 5. UI 更新
+        document.getElementById('score').innerText = `体重: ${Math.floor(player.radius)}`;
+        // 简单计算排名 (比你大的有多少个)
+        let rank = bots.filter(b => b.radius > player.radius).length + 1;
+        document.getElementById('rank').innerText = `当前排名: ${rank}`;
+    }
+
+    function endGame() {
+        gameRunning = false;
+        document.getElementById('endScore').innerText = `最终体重: ${Math.floor(player.radius)}`;
+        document.getElementById('gameOver').style.display = 'block';
+    }
+
+    function restartGame() {
+        initGame();
+        loop();
+    }
+
+    initGame();
+    loop();
+
+</script>
+</body>
+</html>
